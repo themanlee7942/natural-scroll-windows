@@ -1,0 +1,43 @@
+# ── Build outputs ─────────────────────────────────────────────────────
+*.o
+*.obj
+*.res
+*.res.o
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.tmp*
+.fuse_hidden*
+
+# Legacy build folder (replaced by dist/)
+bin/
+
+# Maintainer-only one-shot setup script (not part of the product)
+bootstrap-github.bat
+
+# Diagnostic source not part of the shipping product
+scroll_toggle_dryrun.c
+
+# Debug log dropped by the tool itself at runtime
+scroll_debug.txt
+/scroll_debug.txt
+
+# ── IDE / editor ──────────────────────────────────────────────────────
+.vs/
+.vscode/
+*.sln
+*.suo
+*.user
+*.swp
+.idea/
+
+# ── OS ────────────────────────────────────────────────────────────────
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+# Local installer / archive scratch
+*.zip
+*.7z
