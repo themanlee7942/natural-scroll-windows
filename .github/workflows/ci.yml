@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - '**.c'
+      - '**.h'
+      - 'app.manifest'
+      - 'app.rc'
+      - 'tests/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-and-smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install zig
+        run: pip install ziglang
+
+      - name: Cross-compile both architectures
+        run: |
+          set -e
+          mkdir -p dist
+          build_pair () {
+            local target="$1"
+            local suffix="$2"
+            python3 -m ziglang cc -target "$target" -O2 -Wall \
+              scroll_toggle.c \
+              -lsetupapi -ladvapi32 -luser32 -lcfgmgr32 -lshell32 -lgdi32 -lkernel32 \
+              -Wl,--subsystem,windows \
+              -o "dist/scroll_toggle${suffix}.exe"
+            python3 -m ziglang cc -target "$target" -O2 -Wall -shared \
+              scroll_hook.c -luser32 \
+              -o "dist/scroll_hook${suffix}.dll"
+            cp app.manifest "dist/scroll_toggle${suffix}.exe.manifest"
+          }
+          build_pair x86_64-windows-gnu ""
+          build_pair x86-windows-gnu    "_x86"
+          ls -lh dist/
+
+      - name: Smoke-test the produced PE binaries
+        run: python3 tests/verify_dist.py

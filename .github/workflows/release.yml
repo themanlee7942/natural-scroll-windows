@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: # also allow manual trigger from the Actions tab
+
+permissions:
+  contents: write # needed by softprops/action-gh-release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install zig (via pip wheel — no sudo, fully reproducible)
+        run: pip install ziglang
+
+      - name: Compute version tag
+        id: ver
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # When run via workflow_dispatch there's no tag; fall back to short sha.
+          if [ -z "$TAG" ] || [ "$TAG" = "main" ]; then
+            TAG="dev-$(git rev-parse --short HEAD)"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Building $TAG"
+
+      - name: Cross-compile both architectures
+        run: |
+          set -e
+          mkdir -p dist
+
+          build_pair () {
+            local target="$1"        # x86_64-windows-gnu | x86-windows-gnu
+            local suffix="$2"        # ""  | _x86
+            python3 -m ziglang cc -target "$target" -O2 -Wall \
+              scroll_toggle.c \
+              -lsetupapi -ladvapi32 -luser32 -lcfgmgr32 -lshell32 -lgdi32 -lkernel32 \
+              -Wl,--subsystem,windows \
+              -o "dist/scroll_toggle${suffix}.exe"
+            python3 -m ziglang cc -target "$target" -O2 -Wall -shared \
+              scroll_hook.c -luser32 \
+              -o "dist/scroll_hook${suffix}.dll"
+            cp app.manifest "dist/scroll_toggle${suffix}.exe.manifest"
+          }
+
+          build_pair x86_64-windows-gnu ""
+          build_pair x86-windows-gnu    "_x86"
+
+          ls -lh dist/
+
+      - name: Smoke-test the produced PE binaries
+        run: python3 tests/verify_dist.py
+
+      - name: Package per-architecture zips
+        id: pkg
+        run: |
+          set -e
+          TAG="${{ steps.ver.outputs.tag }}"
+          ZIP_X64="scroll-toggle-${TAG}-x64.zip"
+          ZIP_X86="scroll-toggle-${TAG}-x86.zip"
+
+          ( cd dist
+            zip -j "../${ZIP_X64}" \
+              scroll_toggle.exe scroll_toggle.exe.manifest scroll_hook.dll
+            zip -j "../${ZIP_X86}" \
+              scroll_toggle_x86.exe scroll_toggle_x86.exe.manifest scroll_hook_x86.dll
+          )
+
+          echo "x64=${ZIP_X64}" >> "$GITHUB_OUTPUT"
+          echo "x86=${ZIP_X86}" >> "$GITHUB_OUTPUT"
+
+          # Emit SHA-256 alongside, so users can verify their downloads.
+          sha256sum "${ZIP_X64}" "${ZIP_X86}" | tee SHA256SUMS.txt
+
+      - name: Upload build artefacts (always, even on workflow_dispatch)
+        uses: actions/upload-artifact@v4
+        with:
+          name: scroll-toggle-${{ steps.ver.outputs.tag }}
+          path: |
+            ${{ steps.pkg.outputs.x64 }}
+            ${{ steps.pkg.outputs.x86 }}
+            SHA256SUMS.txt
+          retention-days: 30
+
+      - name: Create / update GitHub Release (tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            ${{ steps.pkg.outputs.x64 }}
+            ${{ steps.pkg.outputs.x86 }}
+            SHA256SUMS.txt
